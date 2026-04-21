@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>データ連携基盤 PoC — 処理全体図</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: #f0f4f8;
+      color: #2d3748;
+      padding: 32px 24px;
+    }
+    h1 { font-size: 1.6rem; font-weight: 700; color: #1a202c; margin-bottom: 4px; }
+    .lead { font-size: 0.9rem; color: #718096; margin-bottom: 36px; }
+    .section-title {
+      font-size: 1.05rem; font-weight: 700;
+      color: #2b6cb0;
+      border-left: 5px solid #3182ce;
+      padding-left: 12px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.07);
+      padding: 32px 36px;
+      margin-bottom: 32px;
+    }
+    .mermaid { margin-top: 8px; }
+
+    /* ステップ説明ボックス */
+    .steps { display: flex; flex-direction: column; gap: 0; margin-top: 24px; }
+    .step {
+      display: flex;
+      gap: 16px;
+      padding: 16px 0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .step:last-child { border-bottom: none; }
+    .step-num {
+      min-width: 32px; height: 32px;
+      background: #3182ce; color: #fff;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+    .step-body h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; color: #1a202c; }
+    .step-body p  { font-size: 0.85rem; color: #4a5568; line-height: 1.6; }
+    code { background: #edf2f7; padding: 1px 6px; border-radius: 4px; font-size: 0.82rem; }
+
+    .tag {
+      display: inline-block;
+      font-size: 0.72rem; font-weight: 700;
+      padding: 2px 8px; border-radius: 999px;
+      margin-right: 6px;
+    }
+    .tag-sqs    { background: #fce7f3; color: #9d174d; }
+    .tag-lambda { background: #ede9fe; color: #5b21b6; }
+    .tag-dynamo { background: #dcfce7; color: #166534; }
+    .tag-s3     { background: #fef9c3; color: #854d0e; }
+    .tag-error  { background: #fee2e2; color: #991b1b; }
+
+    /* 2カラム */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+
+    .info-box {
+      background: #ebf8ff;
+      border-left: 4px solid #3182ce;
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: #1e40af;
+    }
+    .warn-box {
+      background: #fff7ed;
+      border-left: 4px solid #f97316;
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: #9a3412;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>データ連携基盤 PoC — 処理全体図</h1>
+<p class="lead">AWS Lambda + SQS によるVPC内双方向データ連携（インターネット経由なし）</p>
+
+<!-- ======================================================== -->
+<!-- ① 全体構成                                               -->
+<!-- ======================================================== -->
+<div class="card">
+  <div class="section-title">① 全体構成（コンポーネント図）</div>
+  <div class="mermaid">
+flowchart LR
+    subgraph A["🏢 システム A（VPC-A）"]
+        APP_A["アプリケーション"]
+    end
+
+    subgraph AWS["☁️ AWS — データ連携基盤（VPC-Integration）"]
+        direction TB
+
+        subgraph IN["受信キュー"]
+            QFA["SQS\nqueue-from-a"]
+            QFB["SQS\nqueue-from-b"]
+        end
+
+        subgraph PROC["処理（Lambda）"]
+            LAB["Lambda\nA→B Processor"]
+            LBA["Lambda\nB→A Processor"]
+        end
+
+        subgraph OUT["配送キュー"]
+            QTA["SQS\nqueue-to-a"]
+            QTB["SQS\nqueue-to-b"]
+        end
+
+        subgraph STORE["データストア"]
+            DDB["DynamoDB\nべき等性管理"]
+            S3["S3\nアーカイブ"]
+        end
+
+        subgraph DEAD["障害対応"]
+            DLQ_A["DLQ\nA→B失敗分"]
+            DLQ_B["DLQ\nB→A失敗分"]
+        end
+    end
+
+    subgraph B["🏢 システム B（VPC-B）"]
+        APP_B["アプリケーション"]
+    end
+
+    APP_A -- "①送信" --> QFA
+    QFA -- "②トリガー" --> LAB
+    LAB -- "③変換後送信" --> QTB
+    QTB -- "④受信" --> APP_B
+
+    APP_B -- "①送信" --> QFB
+    QFB -- "②トリガー" --> LBA
+    LBA -- "③変換後送信" --> QTA
+    QTA -- "④受信" --> APP_A
+
+    LAB <-.-> DDB
+    LAB -.-> S3
+    LBA <-.-> DDB
+    LBA -.-> S3
+
+    LAB -- "失敗時" --> DLQ_A
+    LBA -- "失敗時" --> DLQ_B
+
+    style A fill:#fefce8,stroke:#ca8a04
+    style B fill:#f0fdf4,stroke:#16a34a
+    style AWS fill:#eff6ff,stroke:#2563eb
+    style IN fill:#fce7f3,stroke:#db2777
+    style OUT fill:#fce7f3,stroke:#db2777
+    style PROC fill:#ede9fe,stroke:#7c3aed
+    style STORE fill:#ecfdf5,stroke:#059669
+    style DEAD fill:#fef2f2,stroke:#ef4444
+  </div>
+</div>
+
+<!-- ======================================================== -->
+<!-- ② A→B 処理シーケンス                                    -->
+<!-- ======================================================== -->
+<div class="card">
+  <div class="section-title">② A→B の処理シーケンス（詳細）</div>
+  <div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant A   as システム A
+    participant QFA as SQS<br>queue-from-a
+    participant LAB as Lambda<br>A→B Processor
+    participant DDB as DynamoDB
+    participant S3  as S3
+    participant QTB as SQS<br>queue-to-b
+    participant B   as システム B
+
+    A  ->>  QFA : SendMessage(payload)
+    Note over QFA,LAB: SQS が Lambda を自動起動（バッチ最大10件）
+
+    QFA ->> LAB : Records[ payload ]
+
+    LAB ->> DDB : べき等性チェック<br>（message_id が未処理か確認）
+    alt 重複メッセージ
+        DDB -->> LAB : 処理済み
+        LAB -->> QFA : スキップ（削除して終了）
+    else 新規メッセージ
+        DDB -->> LAB : OK → ステータス "processing" を記録
+        LAB ->>  S3  : 受信ペイロードをアーカイブ（received）
+        LAB ->>  LAB : データ変換<br>item_code→product_id, qty×price→amount
+        LAB ->>  QTB : SendMessage(変換済みデータ)
+        LAB ->>  S3  : 送信ペイロードをアーカイブ（sent）
+        LAB ->>  DDB : ステータス "done" に更新
+        LAB -->> QFA : 処理完了（メッセージ自動削除）
+    end
+
+    Note over QTB,B: System B が任意のタイミングで受信
+    B  ->>  QTB : ReceiveMessage()
+    QTB -->> B  : 変換済みデータ
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3><span class="tag tag-sqs">SQS</span>メッセージ送信</h3>
+        <p>システム A が <code>queue-from-a</code> へ JSON を送信。<code>message_id</code> を必ず含める。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3><span class="tag tag-lambda">Lambda</span>自動起動</h3>
+        <p>SQS の Event Source Mapping が Lambda をトリガー。最大 <code>BatchSize=10</code> 件をまとめて処理。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3><span class="tag tag-dynamo">DynamoDB</span>べき等性チェック</h3>
+        <p><code>message_id</code> をキーに DynamoDB を確認。SQS は at-least-once 配信のため、同じメッセージが2回来ても1回だけ処理する。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3><span class="tag tag-s3">S3</span>受信アーカイブ</h3>
+        <p>変換前の生データを S3 に保存（<code>a_to_b/YYYY/MM/DD/{id}_received.json</code>）。監査・デバッグ用。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h3><span class="tag tag-lambda">Lambda</span>データ変換</h3>
+        <p><code>transformer.py</code> でフィールドマッピング。例: <code>item_code→product_id</code>、<code>qty×price→amount</code></p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h3><span class="tag tag-sqs">SQS</span>変換済みデータを送信</h3>
+        <p><code>queue-to-b</code> へ送信。システム B は自分のペースでこのキューから受信する。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h3><span class="tag tag-dynamo">DynamoDB</span>完了記録</h3>
+        <p>ステータスを <code>done</code> に更新。TTL=24時間で自動削除。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================== -->
+<!-- ③ Lambda 内部フロー                                      -->
+<!-- ======================================================== -->
+<div class="card">
+  <div class="section-title">③ Lambda 内部処理フロー（handler.py）</div>
+  <div class="mermaid">
+flowchart TD
+    START(["SQS イベント受信\nRecords[]"])
+    LOOP["各レコードをループ処理"]
+    PARSE["① JSON パース\n_parse_body()"]
+    IDEM{"② DynamoDB\nべき等性チェック\ncheck_and_mark()"}
+    SKIP(["スキップ\n（正常終了）"])
+    ARCH_IN["③ S3 アーカイブ\n受信データ保存"]
+    TRANS["④ データ変換\ntransformer.py"]
+    SEND["⑤ SQS 送信\nsqs_sender.send()"]
+    ARCH_OUT["⑥ S3 アーカイブ\n送信データ保存"]
+    DONE["⑦ DynamoDB 更新\nstatus=done"]
+    SUCCESS(["成功\n次のレコードへ"])
+
+    ERR_PARSE["parse 失敗"]
+    ERR_TRANS["変換失敗\nstatus=failed"]
+    ERR_SEND["送信失敗\nstatus=failed"]
+    DLQ(["batchItemFailures\nに追加 → DLQ へ"])
+
+    REPORT(["結果返却\nbatchItemFailures=[]"])
+
+    START --> LOOP --> PARSE
+    PARSE -->|"OK"| IDEM
+    PARSE -->|"エラー"| ERR_PARSE --> DLQ
+
+    IDEM -->|"重複"| SKIP --> LOOP
+    IDEM -->|"新規"| ARCH_IN --> TRANS
+
+    TRANS -->|"OK"| SEND
+    TRANS -->|"エラー"| ERR_TRANS --> DLQ
+
+    SEND -->|"OK"| ARCH_OUT --> DONE --> SUCCESS --> LOOP
+    SEND -->|"エラー"| ERR_SEND --> DLQ
+
+    DLQ --> LOOP
+    LOOP -->|"全件完了"| REPORT
+
+    style START fill:#dbeafe,stroke:#2563eb
+    style REPORT fill:#dcfce7,stroke:#16a34a
+    style SKIP fill:#dcfce7,stroke:#16a34a
+    style DLQ fill:#fee2e2,stroke:#dc2626
+    style IDEM fill:#fef9c3,stroke:#ca8a04
+  </div>
+</div>
+
+<!-- ======================================================== -->
+<!-- ④ 障害時のフロー                                         -->
+<!-- ======================================================== -->
+<div class="card">
+  <div class="section-title">④ 障害時のフロー（リトライ・DLQ）</div>
+  <div class="mermaid">
+flowchart LR
+    subgraph NORMAL["正常フロー"]
+        QI["queue-from-a"] --> L["Lambda"] --> QO["queue-to-b"]
+    end
+
+    subgraph RETRY["リトライフロー（最大3回）"]
+        L2["Lambda\n失敗"] -->|"Visibility Timeout\n経過後に再試行"| QI2["queue-from-a\n（再度 visible）"] --> L3["Lambda\n再実行"]
+        L3 -->|"また失敗"| QI2
+    end
+
+    subgraph DLQ_FLOW["3回失敗後"]
+        DLQ["Dead Letter Queue\ndata-integration-dlq-from-a"]
+        ALARM["CloudWatch Alarm\n（DLQ 件数 ≥ 1 で発報）"]
+        DEV["開発者が調査\n・ログ確認\n・手動再送"]
+        DLQ --> ALARM --> DEV
+    end
+
+    L2 -.->|"maxReceiveCount=3 超過"| DLQ
+
+    style NORMAL fill:#f0fdf4,stroke:#16a34a
+    style RETRY fill:#fff7ed,stroke:#f97316
+    style DLQ_FLOW fill:#fef2f2,stroke:#ef4444
+  </div>
+
+  <div style="margin-top:20px;" class="two-col">
+    <div class="info-box">
+      <strong>batchItemFailures とは？</strong><br>
+      Lambda がバッチ内の失敗レコードだけを報告する機能。<br>
+      10件中1件が失敗しても、残り9件は正常に削除される。<br>
+      失敗した1件だけがリトライ・DLQ の対象になる。
+    </div>
+    <div class="warn-box">
+      <strong>DLQ にメッセージが溜まったら？</strong><br>
+      SQS コンソール → <code>dlq-from-a</code> を確認。<br>
+      「メッセージをポーリング」でエラー内容を確認し、<br>
+      修正後に元のキューへ手動再送する。
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================== -->
+<!-- ⑤ ネットワーク構成                                       -->
+<!-- ======================================================== -->
+<div class="card">
+  <div class="section-title">⑤ ネットワーク構成（インターネット不使用）</div>
+  <div class="mermaid">
+flowchart TB
+    subgraph VPC_A["VPC-A（システム A）"]
+        A["システム A"]
+    end
+
+    subgraph VPC_INT["VPC-Integration（データ連携基盤）\n10.1.0.0/16"]
+        subgraph SUBNET["Private Subnet（IGW/NAT なし）"]
+            LAMBDA["Lambda\nA→B / B→A"]
+        end
+
+        subgraph ENDPOINTS["VPC Endpoints（プライベート通信）"]
+            EP_SQS["SQS\nInterface Endpoint\n← ENI が VPC 内 IP を持つ"]
+            EP_DDB["DynamoDB\nGateway Endpoint\n← ルートテーブルで制御"]
+            EP_S3["S3\nGateway Endpoint\n← ルートテーブルで制御"]
+        end
+    end
+
+    subgraph VPC_B["VPC-B（システム B）"]
+        B["システム B"]
+    end
+
+    TGW["Transit Gateway\n（VPC 間ルーティング）"]
+
+    A <-->|"VPC Peering / TGW"| TGW
+    TGW <-->|"VPC Attachment"| VPC_INT
+    TGW <-->|"VPC Peering / TGW"| VPC_B
+
+    LAMBDA -->|"HTTPS 443\nプライベート"| EP_SQS
+    LAMBDA -->|"HTTPS 443\nプライベート"| EP_DDB
+    LAMBDA -->|"HTTPS 443\nプライベート"| EP_S3
+
+    style VPC_A fill:#fefce8,stroke:#ca8a04
+    style VPC_INT fill:#eff6ff,stroke:#2563eb
+    style VPC_B fill:#f0fdf4,stroke:#16a34a
+    style ENDPOINTS fill:#e0f2fe,stroke:#0284c7
+    style SUBNET fill:#ede9fe,stroke:#7c3aed
+    style TGW fill:#fff7ed,stroke:#ea580c
+  </div>
+
+  <div style="margin-top:20px;" class="info-box">
+    <strong>なぜインターネットを経由しないのか？</strong><br>
+    Lambda は <strong>Private Subnet</strong> に配置され、Internet Gateway も NAT Gateway もありません。<br>
+    SQS / DynamoDB / S3 へのアクセスはすべて <strong>VPC Endpoint</strong> 経由でプライベートに通信します。<br>
+    システム A・B との通信も <strong>VPC Peering または Transit Gateway</strong> 経由で、AWS バックボーンネットワーク内で完結します。
+  </div>
+</div>
+
+<!-- ======================================================== -->
+<!-- ⑥ データ変換の例                                         -->
+<!-- ======================================================== -->
+<div class="card">
+  <div class="section-title">⑥ データ変換の例（transformer.py）</div>
+  <div class="two-col">
+    <div>
+      <p style="font-weight:700; margin-bottom:12px; color:#6b21a8;">A→B 変換（system_a → system_b）</p>
+      <div class="mermaid">
+flowchart TD
+    IN_A["システム A の形式\n{\n  message_id: test-001\n  data: {\n    item_code: ITEM-001\n    qty: 3\n    price: 500\n  }\n}"]
+    TRANS_A["transformer.py\n変換ロジック"]
+    OUT_A["システム B の形式\n{\n  id: test-001\n  source: system_a\n  product_id: ITEM-001\n  quantity: 3\n  amount: 1500\n  sent_at: 2026-...\n}"]
+    IN_A --> TRANS_A --> OUT_A
+
+    style IN_A fill:#fefce8,stroke:#ca8a04,text-align:left
+    style OUT_A fill:#f0fdf4,stroke:#16a34a,text-align:left
+    style TRANS_A fill:#ede9fe,stroke:#7c3aed
+      </div>
+    </div>
+    <div>
+      <p style="font-weight:700; margin-bottom:12px; color:#166534;">B→A 変換（system_b → system_a）</p>
+      <div class="mermaid">
+flowchart TD
+    IN_B["システム B の形式\n{\n  message_id: test-002\n  data: {\n    order_id: ORD-001\n    status: shipped\n    tracking: TRK123\n  }\n}"]
+    TRANS_B["transformer.py\n変換ロジック"]
+    OUT_B["システム A の形式\n{\n  message_id: test-002\n  source: system_b\n  order_no: ORD-001\n  state: shipped\n  tracking_number: TRK123\n  received_at: 2026-...\n}"]
+    IN_B --> TRANS_B --> OUT_B
+
+    style IN_B fill:#f0fdf4,stroke:#16a34a,text-align:left
+    style OUT_B fill:#fefce8,stroke:#ca8a04,text-align:left
+    style TRANS_B fill:#ede9fe,stroke:#7c3aed
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence: { useMaxWidth: true, messageAlign: 'left' }
+  });
+</script>
+</body>
+</html>
