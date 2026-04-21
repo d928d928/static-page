@@ -1,4 +1,4 @@
-# データ連携基盤（中間サーバー）開発 WBS
+# WBS
 
 対象フェーズ：要件定義・設計
 対象アーキテクチャ：AWS ECS Fargate / Aurora PostgreSQL / SQS / Step Functions / ElastiCache Redis、Go実装、CDK (TypeScript)
