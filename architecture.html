@@ -91,7 +91,7 @@
 </head>
 <body>
 
-<h1>データ連携基盤 PoC — 処理全体図</h1>
+<h1>PoC — 処理全体図</h1>
 <p class="lead">AWS Lambda + SQS によるVPC内双方向データ連携（インターネット経由なし）</p>
 
 <!-- ======================================================== -->
@@ -105,7 +105,7 @@ flowchart LR
         APP_A["アプリケーション"]
     end
 
-    subgraph AWS["☁️ AWS — データ連携基盤（VPC-Integration）"]
+    subgraph AWS["☁️ AWS — （VPC-Integration）"]
         direction TB
 
         subgraph IN["受信キュー"]
