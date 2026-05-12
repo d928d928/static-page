@@ -378,3 +378,39 @@
 | 版 | 日付 | 改訂者 | 内容 |
 |---|---|---|---|
 | 0.1 | YYYY-MM-DD | （記入） | 初版 |
+
+
+
+
+
+```mermaid
+flowchart TD
+    PM["プロジェクト責任者<br/>（最終判断者）"]
+
+    PM --> Base["基盤チーム<br/>（移行主体）"]
+    PM --> RMS["RMSチーム<br/>（連携先）"]
+    PM --> CA["CAチーム<br/>（連携先）"]
+
+    Base --> Biz["業務部門<br/>（業務影響確認）"]
+    RMS --> Biz
+    CA --> Biz
+```
+
+
+```mermaid
+flowchart TD
+    PM["プロジェクト責任者"]
+
+    PM --> Ops["基盤運用チーム<br/>（一次受け）"]
+    PM --> RMSOps["RMS運用チーム"]
+    PM --> CAOps["CA運用チーム"]
+```
+
+
+```mermaid
+flowchart LR
+    Detect["障害検知"] --> L1["L1: 基盤運用チーム<br/>Slack #ops-bridge"]
+    L1 -->|30分以内未解決| L2["L2: オンコール<br/>PagerDuty"]
+    L2 -->|重大障害・対外影響| L3["L3: プロジェクト責任者"]
+    L3 -->|個人情報漏洩のおそれ| Sec["セキュリティ部門"]
+```
